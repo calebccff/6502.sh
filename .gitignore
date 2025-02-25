@@ -1,0 +1,7 @@
+6502_65C02_functional_tests/
+*.out
+functional_test_*
+msbasic/
+build/
+*.bin
+
