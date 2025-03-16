@@ -16,10 +16,10 @@ MODE  = $2B                            ; $00=XAM, $7F=STOR, $AE=BLOCK XAM
 
 IN    = $0200                          ; Input buffer
 
-ACIA_DATA   = $5000
-ACIA_STATUS = $5001
-ACIA_CMD    = $5002
-ACIA_CTRL   = $5003
+ACIA_DATA   = $8400
+ACIA_STATUS = $8401
+ACIA_CMD    = $8402
+ACIA_CTRL   = $8403
 
 RESET:
     LDA     #$1F           ; 8-N-1, 19200 baud.
@@ -56,7 +56,7 @@ NEXTCHAR:
     LDA     ACIA_DATA      ; Load character. B7 will be '0'.
     STA     IN,Y           ; Add to text buffer.
     JSR     OUTB           ; Display character.
-    CMP     #$0A           ; newline
+    CMP     #$0D           ; newline
     BNE     NOTCR          ; No.
 
     LDY     #$FF           ; Reset text index.
@@ -71,7 +71,7 @@ BLSKIP:
     INY                    ; Advance text index.
 NEXTITEM:
     LDA     IN,Y           ; Get character.
-    CMP     #$0A           ; CR?
+    CMP     #$0D           ; CR?
     BEQ     GETLINE        ; Yes, done this line.
     CMP     #$2E           ; "."?
     BCC     BLSKIP         ; Skip delimiter.
