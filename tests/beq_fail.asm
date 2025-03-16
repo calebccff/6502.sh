@@ -20,10 +20,10 @@ Reset
     BEQ Fail ; shouldn't branch
     CLC
     LDA #$41
-    STA $4010
+    STA $8010
 Fail
     LDA #$66 ; Carry flag should still be set
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

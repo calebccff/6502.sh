@@ -17,7 +17,7 @@ Reset
     STA $17  ; store 7 at 0x17
     LDY #$4  ; load 4 into Y
     LDX $13,Y ; Load X from 0x13 + Y (0x13 + 0x04) = 0x17
-    STX $4010
+    STX $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

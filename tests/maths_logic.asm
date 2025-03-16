@@ -19,7 +19,7 @@ Reset
     STX $102
     LDA $101
     AND $100,X
-    STA $4010
+    STA $8010
 
 
     ORG $0;NMI_VECTOR; ; Address of section

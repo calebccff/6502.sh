@@ -22,7 +22,7 @@ Reset
     CMP #$00
     LDY #$40
     CPY #$40
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

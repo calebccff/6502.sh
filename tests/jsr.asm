@@ -6,7 +6,7 @@
 Expected ; Expected machine state at end of test
     .word $0F0F ; Indicate that this is a test ROM
     .byte $66 ; A register
-    .byte $0B ; X register
+    .byte $FD ; X register
     .byte $42 ; Y register
     .byte $24 ; P (status) register
     .byte $FF ; Stack pointer
@@ -15,7 +15,7 @@ Expected ; Expected machine state at end of test
 Reset
     JSR Sub
     LDY #$42
-    STX $4010
+    STX $8010
 
     ORG Reset+$40
 Sub

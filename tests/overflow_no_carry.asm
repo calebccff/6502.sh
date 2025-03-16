@@ -17,7 +17,7 @@ Reset
     TAY
     ADC #$50 ; Add the value $50
              ;this should set the overflow and carry flags
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

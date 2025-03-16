@@ -27,9 +27,9 @@ Reset
 
     CMP #$BB
     BEQ Pass
-    STA $4010 ; ASSERT if value doesn't match (test failed)
+    STA $8010 ; ASSERT if value doesn't match (test failed)
 Pass
-    STA $4010 ; ASSERT test passed
+    STA $8010 ; ASSERT test passed
 
     ORG $0;NMI_VECTOR; ; Address of section
 

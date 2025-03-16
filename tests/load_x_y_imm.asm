@@ -15,7 +15,7 @@ Expected ; Expected machine state at end of test
 Reset
     LDX #$A5 ; Load literal 0xA5 into X
     LDY #$5A ; Load literal 0x5A into Y
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

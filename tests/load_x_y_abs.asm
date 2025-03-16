@@ -17,7 +17,7 @@ Reset
     STA $0155
     LDX $0155 ; Load value at 0x0155 into X
     LDY $0155 ; Load value at 0x0155 into Y
-    STX $4010
+    STX $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

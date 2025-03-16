@@ -38,7 +38,7 @@ OUTNUM:
     PHA
     JSR OUTHEX
     LDX #$0A
-    STX $4018
+    STX $8400
     PLA
     RTS
 OUTHEX:
@@ -57,13 +57,13 @@ OUTLOWER:   ; Output lower nibble
     BCC OUTB
     ADC #$06 ; Offset to hex
 OUTB:
-    STA $4018
+    STA $8400
     RTS
 
 
 AddWrapped
     LDA #$BB
-    STA $4010 ; ASSERT (test over)
+    STA $8010 ; ASSERT (test over)
 
     ORG $0;NMI_VECTOR; ; Address of section
 

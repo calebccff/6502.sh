@@ -5,12 +5,12 @@
 
 Expected ; Expected machine state at end of test
     .word $0F0F ; Indicate that this is a test ROM
-    .byte $BC ; A register
-    .byte $A5 ; X register
-    .byte $00 ; Y register
+    .byte $FE ; A register
+    .byte $FD ; X register
+    .byte $A5 ; Y register
     .byte $A4 ; P (status) register
     .byte $FD ; Stack pointer
-    .word $0;ROM_BASE;+$15 ; Program Counter
+    .word $0;ROM_BASE;+$18 ; Program Counter
 
 Reset
     LDA #$A5
@@ -21,7 +21,8 @@ Reset
     TXA
     TSX
     CLD
-    STA $4010
+    LDY $1FE
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

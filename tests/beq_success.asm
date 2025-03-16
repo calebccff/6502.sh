@@ -20,10 +20,10 @@ Reset
     BEQ Success
     CLC
     LDA #$5A
-    sta $4010 ; ASSERT
+    sta $8010 ; ASSERT
 Success
     LDA #$66 ; Carry flag should still be set
-    STA $4010 ; ASSERT
+    STA $8010 ; ASSERT
 
     ORG $0;NMI_VECTOR; ; Address of section
 

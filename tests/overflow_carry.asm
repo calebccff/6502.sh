@@ -17,7 +17,7 @@ Reset
     TAX
     ADC #$90 ; Add the value $90
              ; this should set the overflow flag
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 

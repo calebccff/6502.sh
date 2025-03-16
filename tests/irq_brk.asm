@@ -10,7 +10,7 @@ Expected ; Expected machine state at end of test
     .byte $42 ; Y register
     .byte $61 ; P (status) register
     .byte $FF ; Stack pointer
-    .word $0;ROM_BASE;+$14 ; Program Counter
+    .word $0;ROM_BASE;+$15 ; Program Counter
 
 Reset
     CLI
@@ -18,8 +18,9 @@ Reset
     ADC #$D0 ; Cause the overflow and carry bits to be set
              ; so we can track it across the BRK/RTI
     BRK
+    .byte $00 ; BRK padding
     LDY #$42
-    STA $4010
+    STA $8010
 
     ; Put the interrupt routine higher up so we can't just slide into it
     ORG Reset+$40
@@ -31,7 +32,7 @@ Int
     RTI
 
 Failed ; ASSERT with invalid machine state = fail
-    STA $4010
+    STA $8010
 
     ORG $0;NMI_VECTOR; ; Address of section
 
