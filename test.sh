@@ -10,7 +10,8 @@ if [ $# -gt 0 ]; then
 	exit 0
 fi
 
-for x in build/*.bin; do
+for x in tests/*.asm; do
+	x=build/$(basename $x .asm).bin
 	echo -e "\n\n=========== Running $x ==========="
 	./6502.sh $x || exit 1
 done

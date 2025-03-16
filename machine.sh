@@ -3,11 +3,11 @@
 SZ_1K=1024
 
 # Address where ROMs are loaded
-ROM_BASE=$((0x8000))
-ROM_SIZE=$((0x8000))
+ROM_BASE=$((0xC000))
+ROM_SIZE=$((0x4000))
 
 # Total address space in the machine (RAM + ROM, excluding MMIO)
-RAM_SIZE=$((16*SZ_1K)) #$((2048*SZ_1K))
+RAM_SIZE=$((32*SZ_1K)) #$((2048*SZ_1K))
 
 # For functional test
 #

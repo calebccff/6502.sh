@@ -35,8 +35,8 @@ if [ $# -eq 0 ]; then
 		compile build/$test.asm
 	done
 else
-	preprocess $1 build/$1
-	compile build/$1
+	preprocess $1 build/$(basename $1)
+	compile build/$(basename $1)
 fi
 
 

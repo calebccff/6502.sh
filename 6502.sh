@@ -3,7 +3,7 @@
 # 6502 emulator in busybox ash
 #
 
-trap 'exec 3>&-; rm /tmp/65sh.sock' EXIT
+trap 'exec 3>&-; rm /tmp/65sh.sock 2>/dev/null || :' EXIT
 # Kill the loading subshell
 trap 'touch /tmp/65sh.connected; exit $?' INT
 
@@ -31,7 +31,7 @@ DEBUG_CATEGORIES="INSTR, MEM, ADDR, OPCODE, STATUS"
 # Default categories (provides most readable output)
 # NOTE: the leading/trailing comma simplify manipulating and checking
 # the debug categories, they are required.
-DEBUG_DEFAULT=",INSTR,ADDR,OPCODE,"
+DEBUG_DEFAULT=",INSTR,ADDR,OPCODE,STATUS,"
 # Initialise debug mask
 DEBUG=""
 # Must be comma separated with comma at the start and end!
@@ -80,10 +80,6 @@ error() {
 	shift
 	printf "$fmt" $@ >&2
 
-	{
-	dump_registers
-	dump_status
-	} >&2
 	EXITCODE=1
 	DO_TRAP=1
 	return 0
@@ -160,66 +156,6 @@ heap="$(yes 000 | head -${RAM_SIZE} | tr '\n' ' ')"
 
 # Loaded by loadbin()
 rom=""
-
-memset_impl_cut() {
-	# Set memory in heap
-	# $1: "heap" or "rom"
-	# $2: dest addr (relative to ram/rom base)
-	# $3: value
-	# $4: count
-	debug MEM 'memset $%02X, $%02X, $%02X\n' "$2" "$3" "$4"
-	local dest value count first last i max cmd
-	# Convert hex literals to "numbers"
-	dest=$2
-	value=$(($3))
-	count=$(($4))
-
-	case $1 in
-	heap)
-		max=$RAM_SIZE
-		;;
-	rom)
-		max=$ROM_SIZE
-		;;
-	*)
-		error "Memset called for unknown memory area: %s\n" "$1"
-		return 1
-		;;
-	esac
-
-	if [ $((dest+count)) -gt $max ]; then
-		error "memset failed! $@\n"
-		return 1
-	fi
-
-	# Split the heap into everything before and after the bytes we want to set
-
-	# Start slice
-	cmd=""
-	# handle the fact that cut counts from 1 and MUST produce output
-	# Print everything up until the memory we're writing to
-	if [ $((dest)) -gt 0 ]; then
-		cmd="printf \"%s \" \$$1 | cut -z -d' ' -f1-$((dest));"
-	fi
-
-	# printf the new middle values.
-	# Note the load-bearing space
-	cmd="$cmd printf '"
-	i=count
-	until [ $((i--)) -eq 0 ]; do
-		cmd="$cmd $value"
-	done
-	# Note the load-boearing space
-	cmd="$cmd ';"
-
-	# Get the end slice if there is one, deal with awkward offsets again
-	if [ $((dest+count+1)) -lt $max ]; then
-		cmd="$cmd printf \"%s \" \$$1 | cut -z -d' ' -f$((dest+count+1))-$max"
-	fi
-
-	# set -x
-	eval "set +x; $1=\$($cmd)"
-}
 
 ## Even newer/faster, avoids more(?) subshell
 memset_impl() {
@@ -315,7 +251,7 @@ readb() {
 
 	# Handle MMIO
 	case $readb_addr_rel in
-	$((0x5000)))
+	$((0x8400)))
 		# ACIA_DATA (UART data) read
 		if [ -z "$nextchar" ]; then
 			readb_val="000"
@@ -324,7 +260,7 @@ readb() {
 			nextchar=""
 		fi
 		;;
-	$((0x5001)))
+	$((0x8401)))
 		# ACIA_STATUS (UART status register)
 		if [ -z "$nextchar" ]; then
 			readb_val="000"
@@ -441,24 +377,24 @@ writeb() {
 	# ASSERT register
 	# A write to here signifies the machine is in the wrong
 	# state, usually a test failure.
-	$((0x4010)))
+	$((0x8010)))
 		test_assert
 		return
 		;;
 	# HALT register, traps the emulator as if a breakpoint were hit
-	$((0x4040)))
+	$((0x8040)))
 		printf '\nHALT! $%02X\n' $val
 		DO_TRAP=1
 		return
 		;;
-	# ACIA compatible serial port @ $5000
-	$((0x4018))|$((0x5000)))
+	# ACIA compatible serial port @ $5000 # $((0x4018))|
+	$((0x8400)))
 		# FIXME: surely there's a better way to
 		# go from decimal -> ASCII
 		printf "\x$(printf '%02x' $val)"
 		return
 		;;
-	$((0x5002))|$((0x5003)))
+	$((0x8401))|$((0x8402))|$((0x8403)))
 		# ACIA cmd and ctrl registers
 		return
 		;;
@@ -541,6 +477,7 @@ dump_registers() {
 ##### Status helpers #####
 
 carry_set() {
+	debug STATUS ' carry_set '
 	p=$((p|CARRY))
 	carry=1
 }
@@ -561,6 +498,7 @@ zero_clear() {
 }
 
 oflow_set() {
+	debug STATUS ' oflow_set '
 	p=$((p|OVERFLOW))
 	overflow=1
 }
@@ -610,25 +548,37 @@ decimal_clear() {
 	decimal=0
 }
 
+constant_set() {
+	p=$((p|CONSTANT))
+	constant=1
+}
+
+constant_clear() {
+	p=$((p&(~CONSTANT & 0xff)))
+	constant=0
+}
+
 update_status() {
+	debug STATUS ' update_status $%02X' $1
 	[[ $(($1 & CARRY)) -gt 0 ]] && carry_set || carry_clear
 	[[ $(($1 & ZERO)) -gt 0 ]] && zero_set || zero_clear
 	[[ $(($1 & INTERRUPT)) -gt 0 ]] && interrupt_set || interrupt_clear
-	# [[ $(($1 & DECIMAL)) -gt 0 ]] && decimal_set || decimal_clear
+	[[ $(($1 & DECIMAL)) -gt 0 ]] && decimal_set || decimal_clear
 	[[ $(($1 & BREAK)) -gt 0 ]] && break_set || break_clear
-	# [[ $(($1 & CONSTANT)) -gt 0 ]] && constant_set || constant_clear
+	[[ $(($1 & CONSTANT)) -gt 0 ]] && constant_set || constant_clear
 	[[ $(($1 & OVERFLOW)) -gt 0 ]] && oflow_set || oflow_clear
 	[[ $(($1 & NEGATIVE)) -gt 0 ]] && negative_set || negative_clear
 }
 
 update_negative_zero_bits() {
-	debug STATUS 'update_negative_zero_bits $%02X\n' $1
+	debug STATUS ' update_negative_zero_bits $%02X' $1
 	[[ $(($1 & 0x80)) -eq $((0x80)) ]] && negative_set || negative_clear
 	[[ $1 -eq 0 ]] && zero_set || zero_clear
 }
 
+# Set carry based on arithmetic result (left rotation)
 update_carry() {
-	debug STATUS 'update_carry $%02X\n' $1
+	debug STATUS ' update_carry $%02X' $1
 	[[ $(($1 & 0x80)) -gt 0 ]] && carry_set || carry_clear
 }
 
@@ -720,6 +670,8 @@ adc_impl() {
 	# if bit 7 is set when it shouldn't be
 	if [ $(( ( a^sum ) & ( val^sum ) & 0x80 )) -eq $((0x80)) ]; then
 		oflow_set
+	else
+		oflow_clear
 	fi
 
 	a=$((sum & 0xff))
@@ -797,8 +749,12 @@ cmp() {
 	local res val
 	readb val $1
 	res=$(( (a-val) & 0xff ))
-	debug INSTR 'CMP $%02X $%02X = $%02X' "$a" "$val" $res
+	debug INSTR 'CMP $%02X $%02X = $%02X' $a $val $res
 	update_negative_zero_bits $res
+	# Set the zero bit of the result wrapped down
+	# if [ $a -ge $val ]; then
+	# 	zero_set
+	# fi
 	[[ $a -ge $val ]] && carry_set || carry_clear
 }
 
@@ -814,7 +770,7 @@ cpy() {
 cpx() {
 	local res val
 	readb val $1
-	debug INSTR 'CPX $%02X' "$val"
+	debug INSTR 'CPX $%02X $%02X' $x "$val"
 	res=$(( (x-val) & 0xff ))
 	update_negative_zero_bits $res
 	[[ $x -ge $val ]] && carry_set || carry_clear
@@ -946,7 +902,7 @@ ora() {
 # Push status register to the stack
 php() {
 	local status
-	debug INSTR 'PHP (SP=$%02X)' $((0x100 + s)) # Show stack pointer
+	debug INSTR 'PHP (SP=$%02X) $%02X' $((0x100 + s)) $p # Show stack pointer
 
 	# Always set bit 5 (unused)
 	# Set bit 4 (B/break) if BRK or PHP instruction
@@ -956,13 +912,13 @@ php() {
 
 # Restore status register from the stack. Ignore B and C flags
 plp() {
-	local mask
+	local mask status
 	debug INSTR 'PLP (SP=$%02X)' $((0x100 + s)) # Show stack pointer
 
-	stack_pop p
-	mask=$((~0x30 & 0xFF))
-	debug INSTR ' mask=0x%02X p=$%02X' $mask $p
-	update_status $((p&mask))
+	stack_pop status
+	# mask=$((~0x30 & 0xFF))
+	update_status $status
+	debug INSTR ' p=$%02X' $p
 }
 
 # Push A to the stack
@@ -974,7 +930,7 @@ pha() {
 # Pop stack into A
 pla() {
 	stack_pop a
-	debug INSTR 'PLA (A=$%02X)' $a
+	debug INSTR 'PLA (A=$%02X SP=$%02X)' $a $((0x100 + s))
 
 	update_negative_zero_bits $a
 }
@@ -1080,10 +1036,11 @@ iny() {
 
 inc() {
 	local val
-	readb val $addr
-	writeb $addr $((val+1))
-	debug INSTR 'INC $%04X $%02X' $addr $((val+1))
-	update_negative_zero_bits $x
+	readb val $1
+	val=$(((val+1) & 0xFF))
+	writeb $addr $val
+	debug INSTR 'INC $%04X $%02X' $1 $val
+	update_negative_zero_bits $val
 }
 
 inx() {
@@ -1097,6 +1054,16 @@ dec() {
 	a=$(((a-1) & 0xFF))
 	debug INSTR 'DEC $%02X' $a
 	update_negative_zero_bits $a
+}
+
+dec_mem() {
+	local val
+	readb val $1
+	# FIXME: handle negative ??
+	val=$(((val-1) & 0xFF))
+	debug INSTR 'DEC $%02X' $val
+	writeb $1 $val
+	update_negative_zero_bits $val
 }
 
 dey() {
@@ -1124,12 +1091,12 @@ eor() {
 
 lsr_mem() {
 	local val
-	readb val $addr
+	readb val $1
 
 	[[ $((val & 0x1)) -eq 1 ]] && carry_set || carry_clear
 
 	val=$((val>>1))
-	writeb $addr $val
+	writeb $1 $val
 	debug INSTR 'LSR $%02X' $val
 	update_negative_zero_bits $val
 }
@@ -1154,6 +1121,38 @@ rol_mem() {
 	update_negative_zero_bits $val
 }
 
+rol_acc() {
+	local eqn oldcarry
+	oldcarry=$carry
+	update_carry $a
+	eqn="(( ((a<<1) | oldcarry ) & 0xFF))"
+	eval "a=\$$eqn"
+	debug INSTR 'ROL $%02X' $a
+	update_negative_zero_bits $a
+}
+
+ror_mem() {
+	local val eqn oldcarry
+	readb val $1
+	oldcarry=$carry
+	[[ $((val & 0x1)) -eq 1 ]] && carry_set || carry_clear
+	eqn="(( ((val>>1) | (oldcarry<<7) ) & 0xFF))"
+	eval "val=\$$eqn"
+	debug INSTR 'ROR $%02X' $val
+	writeb $1 $val
+	update_negative_zero_bits $val
+}
+
+ror_acc() {
+	local eqn oldcarry
+	oldcarry=$carry
+	[[ $((a & 0x1)) -eq 1 ]] && carry_set || carry_clear
+	eqn="(( ((a>>1) | (oldcarry<<7) ) & 0xFF))"
+	eval "a=\$$eqn"
+	debug INSTR 'ROR $%02X' $a
+	update_negative_zero_bits $a
+}
+
 # Arithmetic shift left
 asl() {
 	# $1: variable to operate on, e.g. 'a'
@@ -1163,6 +1162,17 @@ asl() {
 	eval "val=\$(( (val << 1) & 0xFF))"
 	update_negative_zero_bits $val
 	eval "$1=\$val"
+	debug INSTR 'ASL $%02X' $val
+}
+
+asl_mem() {
+	# $1: variable to operate on, e.g. 'a'
+	local val eqn
+	readb val $1
+	update_carry $val
+	eval "val=\$(( (val << 1) & 0xFF))"
+	update_negative_zero_bits $val
+	writeb $1 $val
 	debug INSTR 'ASL $%02X' $val
 }
 
@@ -1199,9 +1209,8 @@ addr_aby() {
 	readh addr $pc
 	pc=$((pc+2))
 
+	debug ADDR 'ABY $%-4X y=$%02X | ' $addr $y
 	addr=$((addr+y))
-
-	debug ADDR 'ABY $%-4X       | ' $addr
 }
 
 addr_zer() {
@@ -1242,17 +1251,31 @@ addr_indx() {
 }
 
 addr_indy() {
-	local lsb_addr msb eqn
+	local lsb_addr msb_addr msb eqn _carry
 	readb lsb_addr $((pc++))
 	readb addr $lsb_addr
 	addr=$((addr+y))
-	update_carry $addr
+	# update_carry $addr
+	[[ $addr -gt $((0xFF)) ]] && _carry=1 || _carry=0
 	addr=$((addr & 0xFF))
-	readb msb $((lsb_addr+1+$carry))
+	msb_addr=$(((lsb_addr+1) & 0xFF))
+	readb msb $msb_addr
+	msb=$((msb+_carry))
 	# Useless eval because my IDE treats arithmetic expressions like subshells
 	eqn="((addr + (msb << 8) ))"
 	eval "addr=\$$eqn"
 	debug ADDR '(%-2X),%-2X = $%-4X | ' $lsb_addr $y $addr
+}
+
+# Indirect indexed (Indirect),Y
+addr_indy_new() {
+	local msb
+	readh addr $pc
+	pc=$((pc+2))
+	# Set carry flag if the result of adding Y will overflow
+	[[ $(((addr & 0xFF) + y)) -gt $((0xFF)) ]] && carry_set || carry_clear
+	addr=$((addr+y))
+	debug ADDR '(Ind),$%02X = $%-4X c=%d | ' $y $addr $carry
 }
 
 read_char() {
@@ -1327,6 +1350,7 @@ run_monitor() {
 	local inp cmd bp i idx addr fmt spec target tmp
 
 	if [ $DO_TRAP -eq 1 ]; then
+		dump_status
 		dump_registers
 	fi
 
@@ -1490,7 +1514,7 @@ run_monitor() {
 				update_status $p
 			fi
 			;;
-		ps)
+		ps|status|stat)
 			dump_status
 			;;
 		stack)
@@ -1588,9 +1612,7 @@ decode_execute() {
 			return
 		fi
 		addr_zer
-		readb __val $addr
-		asl __val
-		writeb $addr __val
+		asl_mem $addr
 		;;
 	$((0x08)))
 		if [ -n "$2" ]; then
@@ -1616,6 +1638,22 @@ decode_execute() {
 		addr_imp
 		asl a
 		;;
+	$((0x0D)))
+		if [ -n "$2" ]; then
+			eval "$2='ORA abs'"
+			return
+		fi
+		addr_abs
+		ora $addr
+		;;
+	$((0x0E)))
+		if [ -n "$2" ]; then
+			eval "$2='ASL abs'"
+			return
+		fi
+		addr_abs
+		asl_mem $addr
+		;;
 	$((0x10)))
 		if [ -n "$2" ]; then
 			eval "$2='BPL rel'"
@@ -1624,6 +1662,30 @@ decode_execute() {
 		addr_rel
 		bpl $addr
 		;;
+	$((0x11)))
+		if [ -n "$2" ]; then
+			eval "$2='ORA iny'"
+			return
+		fi
+		addr_indy
+		ora $addr
+		;;
+	$((0x15)))
+		if [ -n "$2" ]; then
+			eval "$2='ORA zex'"
+			return
+		fi
+		addr_zex
+		ora $addr
+		;;
+	$((0x16)))
+		if [ -n "$2" ]; then
+			eval "$2='ASL zex'"
+			return
+		fi
+		addr_zex
+		asl_mem $addr
+		;;
 	$((0x18)))
 		if [ -n "$2" ]; then
 			eval "$2='CLC imp'"
@@ -1631,6 +1693,30 @@ decode_execute() {
 		fi
 		addr_imp
 		clc
+		;;
+	$((0x19)))
+		if [ -n "$2" ]; then
+			eval "$2='ORA aby'"
+			return
+		fi
+		addr_aby
+		ora $addr
+		;;
+	$((0x1D)))
+		if [ -n "$2" ]; then
+			eval "$2='ORA abx'"
+			return
+		fi
+		addr_abx
+		ora $addr
+		;;
+	$((0x1E)))
+		if [ -n "$2" ]; then
+			eval "$2='ASL abx'"
+			return
+		fi
+		addr_abx
+		asl_mem $addr
 		;;
 	$((0x20)))
 		if [ -n "$2" ]; then
@@ -1647,13 +1733,13 @@ decode_execute() {
 			DO_TRAP=1
 		fi
 		;;
-	$((0x26)))
+	$((0x21)))
 		if [ -n "$2" ]; then
-			eval "$2='ROL zer'"
+			eval "$2='AND inx'"
 			return
 		fi
-		addr_zer
-		rol_mem $addr
+		addr_indx
+		and $addr
 		;;
 	$((0x24)))
 		if [ -n "$2" ]; then
@@ -1662,6 +1748,22 @@ decode_execute() {
 		fi
 		addr_zer
 		bit $addr
+		;;
+	$((0x25)))
+		if [ -n "$2" ]; then
+			eval "$2='AND zer'"
+			return
+		fi
+		addr_zer
+		and $addr
+		;;
+	$((0x26)))
+		if [ -n "$2" ]; then
+			eval "$2='ROL zer'"
+			return
+		fi
+		addr_zer
+		rol_mem $addr
 		;;
 	$((0x28)))
 		if [ -n "$2" ]; then
@@ -1679,6 +1781,14 @@ decode_execute() {
 		addr_imm
 		and $addr
 		;;
+	$((0x2A)))
+		if [ -n "$2" ]; then
+			eval "$2='ROL acc'"
+			return
+		fi
+		addr_imp
+		rol_acc
+		;;
 	$((0x2C)))
 		if [ -n "$2" ]; then
 			eval "$2='BIT abs'"
@@ -1686,6 +1796,22 @@ decode_execute() {
 		fi
 		addr_abs
 		bit $addr
+		;;
+	$((0x2D)))
+		if [ -n "$2" ]; then
+			eval "$2='AND abs'"
+			return
+		fi
+		addr_abs
+		and $addr
+		;;
+	$((0x2E)))
+		if [ -n "$2" ]; then
+			eval "$2='ROL abs'"
+			return
+		fi
+		addr_abs
+		rol_mem $addr
 		;;
 	$((0x30)))
 		if [ -n "$2" ]; then
@@ -1695,6 +1821,30 @@ decode_execute() {
 		addr_rel
 		bmi $addr
 		;;
+	$((0x31)))
+		if [ -n "$2" ]; then
+			eval "$2='AND iny'"
+			return
+		fi
+		addr_indy
+		and $addr
+		;;
+	$((0x35)))
+		if [ -n "$2" ]; then
+			eval "$2='AND zex'"
+			return
+		fi
+		addr_zex
+		and $addr
+		;;
+	$((0x36)))
+		if [ -n "$2" ]; then
+			eval "$2='ROL zex'"
+			return
+		fi
+		addr_zex
+		rol_mem $addr
+		;;
 	$((0x38)))
 		if [ -n "$2" ]; then
 			eval "$2='SEC imp'"
@@ -1702,6 +1852,14 @@ decode_execute() {
 		fi
 		addr_imp
 		sec
+		;;
+	$((0x39)))
+		if [ -n "$2" ]; then
+			eval "$2='AND aby'"
+			return
+		fi
+		addr_aby
+		and $addr
 		;;
 	$((0x3A)))
 		if [ -n "$2" ]; then
@@ -1719,6 +1877,14 @@ decode_execute() {
 		addr_abx
 		and $addr
 		;;
+	$((0x3E)))
+		if [ -n "$2" ]; then
+			eval "$2='ROL abx'"
+			return
+		fi
+		addr_abx
+		rol_mem $addr
+		;;
 	$((0x40)))
 		if [ -n "$2" ]; then
 			eval "$2='RTI imp'"
@@ -1726,6 +1892,22 @@ decode_execute() {
 		fi
 		addr_imp
 		rti
+		;;
+	$((0x41)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR inx'"
+			return
+		fi
+		addr_indx
+		eor $addr
+		;;
+	$((0x45)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR zer'"
+			return
+		fi
+		addr_zer
+		eor $addr
 		;;
 	$((0x46)))
 		if [ -n "$2" ]; then
@@ -1768,6 +1950,22 @@ decode_execute() {
 		pc=$addr
 		debug INSTR 'JMP $%02X' $pc
 		;;
+	$((0x4D)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR abs'"
+			return
+		fi
+		addr_abs
+		eor $addr
+		;;
+	$((0x4E)))
+		if [ -n "$2" ]; then
+			eval "$2='LSR abs'"
+			return
+		fi
+		addr_abs
+		lsr_mem $addr
+		;;
 	$((0x50)))
 		if [ -n "$2" ]; then
 			eval "$2='BVC rel'"
@@ -1776,6 +1974,30 @@ decode_execute() {
 		addr_rel
 		bvc $addr
 		;;
+	$((0x51)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR iny'"
+			return
+		fi
+		addr_indy
+		eor $addr
+		;;
+	$((0x55)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR zex'"
+			return
+		fi
+		addr_zex
+		eor $addr
+		;;
+	$((0x56)))
+		if [ -n "$2" ]; then
+			eval "$2='LSR zex'"
+			return
+		fi
+		addr_zex
+		lsr_mem $addr
+		;;
 	$((0x58)))
 		if [ -n "$2" ]; then
 			eval "$2='CLI imp'"
@@ -1783,6 +2005,30 @@ decode_execute() {
 		fi
 		addr_imp
 		cli
+		;;
+	$((0x59)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR aby'"
+			return
+		fi
+		addr_aby
+		eor $addr
+		;;
+	$((0x5D)))
+		if [ -n "$2" ]; then
+			eval "$2='EOR abx'"
+			return
+		fi
+		addr_abx
+		eor $addr
+		;;
+	$((0x5E)))
+		if [ -n "$2" ]; then
+			eval "$2='LSR abx'"
+			return
+		fi
+		addr_abx
+		lsr_mem $addr
 		;;
 	$((0x60)))
 		if [ -n "$2" ]; then
@@ -1798,6 +2044,14 @@ decode_execute() {
 			DO_TRAP=1
 		fi
 		;;
+	$((0x61)))
+		if [ -n "$2" ]; then
+			eval "$2='ADC inx'"
+			return
+		fi
+		addr_indx
+		adc $addr
+		;;
 	$((0x65)))
 		if [ -n "$2" ]; then
 			eval "$2='ADC zer'"
@@ -1805,6 +2059,14 @@ decode_execute() {
 		fi
 		addr_zer
 		adc $addr
+		;;
+	$((0x66)))
+		if [ -n "$2" ]; then
+			eval "$2='ROR zer'"
+			return
+		fi
+		addr_zer
+		ror_mem $addr
 		;;
 	$((0x68)))
 		if [ -n "$2" ]; then
@@ -1822,6 +2084,14 @@ decode_execute() {
 		addr_imm
 		adc $addr
 		;;
+	$((0x6A)))
+		if [ -n "$2" ]; then
+			eval "$2='ROR imp'"
+			return
+		fi
+		addr_imp
+		ror_acc
+		;;
 	$((0x6C)))
 		if [ -n "$2" ]; then
 			eval "$2='JMP ind'"
@@ -1831,6 +2101,22 @@ decode_execute() {
 		pc=$addr
 		debug INSTR 'JMP $%02X' $pc
 		;;
+	$((0x6D)))
+		if [ -n "$2" ]; then
+			eval "$2='ADC abs'"
+			return
+		fi
+		addr_abs
+		adc $addr
+		;;
+	$((0x6E)))
+		if [ -n "$2" ]; then
+			eval "$2='ROR abs'"
+			return
+		fi
+		addr_abs
+		ror_mem $addr
+		;;
 	$((0x70)))
 		if [ -n "$2" ]; then
 			eval "$2='BVS rel'"
@@ -1838,6 +2124,14 @@ decode_execute() {
 		fi
 		addr_rel
 		bvs $addr
+		;;
+	$((0x71)))
+		if [ -n "$2" ]; then
+			eval "$2='ADC iny'"
+			return
+		fi
+		addr_indy
+		adc $addr
 		;;
 	$((0x75)))
 		if [ -n "$2" ]; then
@@ -1847,13 +2141,53 @@ decode_execute() {
 		addr_zex
 		adc $addr
 		;;
+	$((0x76)))
+		if [ -n "$2" ]; then
+			eval "$2='ROR zex'"
+			return
+		fi
+		addr_zex
+		ror_mem $addr
+		;;
 	$((0x78)))
 		if [ -n "$2" ]; then
-			eval "$2='ADC zex'"
+			eval "$2='SEI imp'"
 			return
 		fi
 		addr_imp
 		sei
+		;;
+	$((0x79)))
+		if [ -n "$2" ]; then
+			eval "$2='ADC aby'"
+			return
+		fi
+		addr_aby
+		adc $addr
+		;;
+	$((0x7D)))
+		if [ -n "$2" ]; then
+			eval "$2='ADC abx'"
+			return
+		fi
+		addr_abx
+		adc $addr
+		;;
+	$((0x7E)))
+		if [ -n "$2" ]; then
+			eval "$2='ROR abx'"
+			return
+		fi
+		addr_abx
+		ror_mem $addr
+		;;
+	$((0x81)))
+		if [ -n "$2" ]; then
+			eval "$2='STA inx'"
+			return
+		fi
+		addr_indx
+		sta $addr
 		;;
 	$((0x84)))
 		if [ -n "$2" ]; then
@@ -2183,6 +2517,14 @@ decode_execute() {
 		addr_imm
 		cpy $addr
 		;;
+	$((0xC1)))
+		if [ -n "$2" ]; then
+			eval "$2='CMP inx'"
+			return
+		fi
+		addr_indx
+		cmp $addr
+		;;
 	$((0xC4)))
 		if [ -n "$2" ]; then
 			eval "$2='CPY zer'"
@@ -2198,6 +2540,14 @@ decode_execute() {
 		fi
 		addr_zer
 		cmp $addr
+		;;
+	$((0xC6)))
+		if [ -n "$2" ]; then
+			eval "$2='DEC zer'"
+			return
+		fi
+		addr_zer
+		dec_mem $addr
 		;;
 	$((0xC8)))
 		if [ -n "$2" ]; then
@@ -2239,6 +2589,14 @@ decode_execute() {
 		addr_abs
 		cmp $addr
 		;;
+	$((0xCE)))
+		if [ -n "$2" ]; then
+			eval "$2='DEC abs'"
+			return
+		fi
+		addr_abs
+		dec_mem $addr
+		;;
 	$((0xD0)))
 		if [ -n "$2" ]; then
 			eval "$2='BNE rel'"
@@ -2262,6 +2620,14 @@ decode_execute() {
 		fi
 		addr_zex
 		cmp $addr
+		;;
+	$((0xD6)))
+		if [ -n "$2" ]; then
+			eval "$2='DEC zex'"
+			return
+		fi
+		addr_zex
+		dec_mem $addr
 		;;
 	$((0xD8)))
 		if [ -n "$2" ]; then
@@ -2287,6 +2653,14 @@ decode_execute() {
 		addr_abx
 		cmp $addr
 		;;
+	$((0xDE)))
+		if [ -n "$2" ]; then
+			eval "$2='DEC abx'"
+			return
+		fi
+		addr_abx
+		dec_mem $addr
+		;;
 	$((0xE0)))
 		if [ -n "$2" ]; then
 			eval "$2='CPX imm'"
@@ -2294,6 +2668,14 @@ decode_execute() {
 		fi
 		addr_imm
 		cpx $addr
+		;;
+	$((0xE1)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC inx'"
+			return
+		fi
+		addr_indx
+		sbc $addr
 		;;
 	$((0xE4)))
 		if [ -n "$2" ]; then
@@ -2351,6 +2733,22 @@ decode_execute() {
 		addr_abs
 		cpx $addr
 		;;
+	$((0xED)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC abs'"
+			return
+		fi
+		addr_abs
+		sbc $addr
+		;;
+	$((0xEE)))
+		if [ -n "$2" ]; then
+			eval "$2='INC abs'"
+			return
+		fi
+		addr_abs
+		inc $addr
+		;;
 	$((0xF0)))
 		if [ -n "$2" ]; then
 			eval "$2='BEQ rel'"
@@ -2359,6 +2757,30 @@ decode_execute() {
 		addr_rel
 		beq $addr
 		;;
+	$((0xF1)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC iny'"
+			return
+		fi
+		addr_indy
+		sbc $addr
+		;;
+	$((0xF5)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC zex'"
+			return
+		fi
+		addr_zex
+		sbc $addr
+		;;
+	$((0xF6)))
+		if [ -n "$2" ]; then
+			eval "$2='INC zex'"
+			return
+		fi
+		addr_zex
+		inc $addr
+		;;
 	$((0xF8)))
 		if [ -n "$2" ]; then
 			eval "$2='SED imp'"
@@ -2366,6 +2788,30 @@ decode_execute() {
 		fi
 		addr_imp
 		sed_instr
+		;;
+	$((0xF9)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC aby'"
+			return
+		fi
+		addr_aby
+		sbc $addr
+		;;
+	$((0xFD)))
+		if [ -n "$2" ]; then
+			eval "$2='SBC abx'"
+			return
+		fi
+		addr_abx
+		sbc $addr
+		;;
+	$((0xFE)))
+		if [ -n "$2" ]; then
+			eval "$2='INC abx'"
+			return
+		fi
+		addr_abx
+		inc $addr
 		;;
 	$((0xFF)))
 		# Invalid opcode! We didn't halt?
@@ -2426,7 +2872,8 @@ run_cpu() {
 
 		instr_count=$((instr_count+1))
 
-		if [ $oldpc -eq $pc ]; then
+		# Don't trap on RTS instructions
+		if [ $oldpc -eq $pc -a $opcode -ne $((0x60)) ]; then
 			error '\n\n[!!!] TRAP!\n'
 			dump_stack
 		fi
