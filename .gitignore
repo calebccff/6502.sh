@@ -1,4 +1,7 @@
 6502_65C02_functional_tests/
+mike-6502
+*.o
+*.lst
 *.out
 functional_test_*
 msbasic/

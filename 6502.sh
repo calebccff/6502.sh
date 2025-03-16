@@ -31,7 +31,7 @@ DEBUG_CATEGORIES="INSTR, MEM, ADDR, OPCODE, STATUS"
 # Default categories (provides most readable output)
 # NOTE: the leading/trailing comma simplify manipulating and checking
 # the debug categories, they are required.
-DEBUG_DEFAULT=",INSTR,ADDR,OPCODE,STATUS,"
+DEBUG_DEFAULT=",INSTR,ADDR,OPCODE,"
 # Initialise debug mask
 DEBUG=""
 # Must be comma separated with comma at the start and end!
@@ -1237,7 +1237,7 @@ addr_rel() {
 
 addr_ind() {
 	readh addr $pc
-	debug ADDR 'IND (=$%-4X) | ' $addr
+	debug ADDR 'IND (=$%-4X)    | ' $addr
 	readh addr $addr
 }
 
@@ -1348,6 +1348,8 @@ save () {
 # Debug monitor
 run_monitor() {
 	local inp cmd bp i idx addr fmt spec target tmp
+
+	printf '> Dropping into debug monitor\n'
 
 	if [ $DO_TRAP -eq 1 ]; then
 		dump_status
